@@ -1,8 +1,13 @@
 from tkinter import *
+from tkinter import messagebox
+from integrals import DomainError, ZeroDenominatorError, StepError, \
+	OddStepWarning
+from PIL import Image, ImageTk
 import webbrowser
+import integrals
 from tkinter import font
-from turtledemo.penrose import makeshapes
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import numpy as np
 
 
@@ -10,7 +15,7 @@ class MainApp:
 	def __init__(self):
 		self.root = Tk()
 		self.window = MainWindow(self.root)
-		self.root.geometry('400x400')
+		self.root.geometry('800x500')
 	def run(self):
 		self.root.mainloop()
 	def exit_app(self):
@@ -72,7 +77,7 @@ class MainWindow:
 	def switch_to_frame(self, frame_class):
 		if self.current_frame is not None:
 			self.current_frame.destroy()
-		self.current_frame = frame_class(self.content_frame)
+		self.current_frame = frame_class(self.content_frame, self)
 		self.current_frame.pack(expand=True, fill=BOTH)
 
 	def open_about(self):
@@ -91,6 +96,8 @@ class MainWindow:
 		self.switch_to_frame(InterpolationFrame)
 	def open_diff_eql(self):
 		self.switch_to_frame(DifferentialEquationFrame)
+	def open_runge(self):
+		self.switch_to_frame(RungeRuleFrame)
 
 class AboutWindow:
 	def __init__(self, parent):
@@ -139,10 +146,11 @@ class AboutWindow:
 
 
 class WelcomeFrame(Frame):
-	def __init__(self, main_frame):
+	def __init__(self, main_frame, main_app):
 		Frame.__init__(self, main_frame)
 		self.make_welcome_text()
 		self.pack(expand=True, fill=BOTH)
+		self.main_app = main_app
 	def make_welcome_text(self):
 		self.welcome_text = Label(self,
 		             text='Добро пожаловать!\n\n'
@@ -158,48 +166,540 @@ class WelcomeFrame(Frame):
 		self.welcome_text.pack(expand=True, fill=BOTH)
 
 class IntegralFrame(Frame):
-	def __init__(self, main_frame):
+	def __init__(self, main_frame, main_app):
 		Frame.__init__(self, main_frame)
+		self.main_app = main_app
 		self.make_widgets()
+
 	def make_widgets(self):
-		self.test_text = Label(self, text='Сегодня хорошая погода')
-		self.test_text.pack(expand=True, fill=BOTH)
+		self.input_area_frame = Frame(self)
+		self.graph_area_frame = Frame(self)
+		self.pick_integral_frame = Frame(self.input_area_frame)
+		self.input_num_frame = Frame(self.input_area_frame)
+		self.output_num_frame = Frame(self.input_area_frame)
+		self.input_area_frame.pack(side=LEFT, expand=True, fill=BOTH)
+		self.graph_area_frame.pack(side=RIGHT, expand=True, fill=BOTH)
+		self.pick_integral_frame.pack(side=TOP, expand=True, fill=BOTH)
+		self.input_num_frame.pack(side=TOP, expand=True, fill=BOTH)
+		self.output_num_frame.pack(side=BOTTOM, expand=True, fill=BOTH)
+
+		self.selected_integral = IntVar()
+		self.selected_integral.set(1)
+
+		self.img1 = Image.open('integral_1.png')
+		self.img2 = Image.open('integral_2.png')
+		self.photo1 = ImageTk.PhotoImage(self.img1)
+		self.photo2 = ImageTk.PhotoImage(self.img2)
+
+		Radiobutton(self.pick_integral_frame,
+		                       text='1',
+		                       variable=self.selected_integral,
+		                       value=1).grid(
+			row=0, column=0, padx=5, pady=5
+		)
+		Radiobutton(self.pick_integral_frame,
+		                       text='2',
+		                       variable=self.selected_integral,
+		                       value=2).grid(
+			row=1, column=0, padx=5, pady=5
+		)
+
+		Label(self.pick_integral_frame,
+		      image=self.photo1).grid(row=0, column=1, padx=5, pady=5)
+		Label(self.pick_integral_frame,
+		      image=self.photo2).grid(row=1, column=1, padx=5, pady=5)
+
+		Label(self.input_num_frame, text='a').grid(row=0, column=0, padx=5, pady=5)
+		Label(self.input_num_frame, text='b').grid(row=1, column=0, padx=5, pady=5)
+		Label(self.input_num_frame, text='h').grid(row=2, column=0, padx=5, pady=5)
+
+		self.lower = StringVar()
+		self.upper = StringVar()
+		self.stride = StringVar()
+
+		Entry(self.input_num_frame, textvariable=self.lower).grid(row=0, column=1, padx=5, pady=5)
+		Entry(self.input_num_frame, textvariable=self.upper).grid(row=1, column=1, padx=5, pady=5)
+		Entry(self.input_num_frame, textvariable=self.stride).grid(row=2, column=1, padx=5, pady=5)
+
+		Button(self.input_num_frame, text='Запустить ракету',
+		                  command=self.printer).grid(row=3, column=0, padx=5, pady=5)
+		Button(self.input_num_frame, text='Подбор n',
+		       command=self.find_min_n).grid(row=3, column=1, padx=5, pady=5)
+
+		self.results = {}
+		self.results['left_rectangle'] = StringVar()
+		self.results['right_rectangle'] = StringVar()
+		self.results['trapezoidal'] = StringVar()
+		self.results['simpson_rule'] = StringVar()
+		self.results['min_common_step'] = StringVar()
+		self.make_output(self.output_num_frame)
+
+		self.fig = plt.figure(figsize=(5, 4), dpi=100)
+		self.ax = self.fig.add_subplot(111)
+		self.ax.set_title("Пустой график")
+
+		self.canvas = FigureCanvasTkAgg(self.fig,
+		                                master=self.graph_area_frame)
+		self.canvas.draw()
+		self.canvas.get_tk_widget().pack(expand=True, fill=BOTH)
+
+	def printer(self):
+		try:
+			params = self.get_input()
+			results = self.calculate_integrals(params)
+			self.update_results(results)
+			self.update_plot(params)
+
+		except ValueError:
+			messagebox.showerror(
+				"Ошибка ввода",
+				"Проверьте, что a, b и n введены корректно"
+			)
+
+		except StepError:
+			messagebox.showerror(
+				"Ошибка шага",
+				"n должно быть целым числом хотя бы равным 1"
+			)
+
+		except DomainError:
+			messagebox.showerror(
+				"Ошибка области определения",
+				"Функция не определена на данном интервале"
+			)
+
+		except ZeroDenominatorError:
+			messagebox.showerror(
+				"Деление на ноль",
+				"Знаменатель обращается в ноль"
+			)
+
+		except Exception as e:
+			messagebox.showerror(
+				"Неизвестная ошибка",
+				str(e)
+			)
+
+	def find_min_n(self):
+		try:
+			self.results['min_common_step'].set(integrals.find_common_step(
+				*self.get_input()
+			))
+		except OddStepWarning as e:
+			messagebox.showerror(
+				'Ошибка вычисления min n',
+				e
+			)
+		except Exception as e:
+			messagebox.showerror(
+				'Что-то пошло не так',
+				e
+			)
+		Button(self.output_num_frame, text='Проверить nmin',
+		       command=self.check_n).grid(
+			row=5, column=1, padx=5, pady=5
+		)
+	def check_n(self):
+		self.stride.set(integrals.find_common_step(*self.get_input()))
+		self.printer()
+
+	def get_input(self):
+		a = float(self.lower.get())
+		b = float(self.upper.get())
+		n = int(self.stride.get())
+
+		if self.selected_integral.get() == 1:
+			func = integrals.function_1
+		elif self.selected_integral.get() == 2:
+			func = integrals.function_2
+
+		return func, a, b, n
+
+	def calculate_integrals(self, input_data):
+		res_dict = {
+			'left_rectangle': integrals.left_rectangle(*input_data),
+			'right_rectangle': integrals.right_rectangle(*input_data),
+			'trapezoidal': integrals.trapezoidal(*input_data),
+		}
+		try:
+			res_dict['simpson_rule'] = integrals.simpson_rule(*input_data)
+		except OddStepWarning:
+			res_dict['simpson_rule'] = 'enter even n!!'
+			messagebox.showwarning(
+				'Нечетное разбиение',
+				'Simpson rule requires even n'
+			)
+		return res_dict
+
+
+	def update_results(self, results: dict):
+		for key in results:
+			self.results[key].set(results[key])
+
+	def update_plot(self, params):
+		func, a, b, n = params
+
+		self.ax.clear()
+		x = np.linspace(a, b, n)
+		y = func(x)
+
+		self.ax.plot(x, y)
+		self.canvas.draw()
+
+	def make_output(self, parent):
+		Label(parent, text='Правые прямоугольников').grid(
+			row=0, column=0, padx=5, pady=5
+		)
+		Label(parent, text='Левые прямоугольники').grid(
+			row=1, column=0, padx=5, pady=5,
+		)
+		Label(parent, text='Трапеции').grid(
+			row=2, column=0, padx=5, pady=5,
+		)
+		Label(parent, text='Симпсон').grid(
+			row=3, column=0, padx=5, pady=5,
+		)
+		Label(parent, text='Nmin').grid(
+			row=4, column=0, padx=5, pady=5,
+		)
+		Entry(parent,
+		      textvariable=self.results['left_rectangle'],
+		      state='readonly').grid(
+			row=0, column=1, padx=5, pady=5
+		)
+		Entry(parent,
+		      textvariable=self.results['right_rectangle'],
+		      state='readonly').grid(
+			row=1, column=1, padx=5, pady=5
+		)
+		Entry(parent,
+		      textvariable=self.results['trapezoidal'],
+		      state='readonly').grid(
+			row=2, column=1, padx=5, pady=5
+		)
+		Entry(parent, textvariable=self.results['simpson_rule'],
+		      state='readonly').grid(
+			row=3, column=1, padx=5, pady=5
+		)
+		Entry(parent, textvariable=self.results['min_common_step'],
+		      state='readonly').grid(
+			row=4, column=1, padx=5, pady=5
+		)
+		Button(parent, text='Метод Рунге',
+		       command=self.main_app.open_runge).grid(
+			row=5, column=0, padx=5, pady=5
+		)
+
+
+	def notdone(self):
+		pass
+
+
+class RungeRuleFrame(Frame):
+	def __init__(self, main_frame, main_app):
+		Frame.__init__(self, main_frame)
+		self.main_app = main_app
+		self.make_widgets()
+
+	def make_widgets(self):
+		self.input_area_frame = Frame(self)
+		self.graph_area_frame = Frame(self)
+		self.bottom_frame = Frame(self)
+		self.bottom_frame.pack(side=BOTTOM, fill=X)
+		self.pick_integral_frame = Frame(self.input_area_frame)
+		self.input_num_frame = Frame(self.input_area_frame)
+		self.output_num_frame = Frame(self.bottom_frame)
+		self.input_area_frame.pack(side=LEFT, anchor=NW)
+		self.graph_area_frame.pack(side=RIGHT, anchor=NE)
+		self.pick_integral_frame.pack(side=TOP, anchor=NW)
+		self.input_num_frame.pack(side=TOP, anchor=W)
+		self.output_num_frame.pack(side=LEFT, fill=X, anchor=W)
+
+		self.selected_integral = IntVar()
+		self.selected_integral.set(1)
+
+		self.img1 = Image.open('integral_1.png')
+		self.img2 = Image.open('integral_2.png')
+		self.photo1 = ImageTk.PhotoImage(self.img1)
+		self.photo2 = ImageTk.PhotoImage(self.img2)
+
+		Radiobutton(self.pick_integral_frame,
+		                       text='1',
+		                       variable=self.selected_integral,
+		                       value=1).grid(
+			row=0, column=0, padx=5, pady=5
+		)
+		Radiobutton(self.pick_integral_frame,
+		                       text='2',
+		                       variable=self.selected_integral,
+		                       value=2).grid(
+			row=1, column=0, padx=5, pady=5
+		)
+
+		Label(self.pick_integral_frame,
+		      image=self.photo1).grid(row=0, column=1, padx=5, pady=5)
+		Label(self.pick_integral_frame,
+		      image=self.photo2).grid(row=1, column=1, padx=5, pady=5)
+
+
+		Label(self.input_num_frame, text='a').grid(row=0, column=0, padx=5, pady=5)
+		Label(self.input_num_frame, text='b').grid(row=1, column=0, padx=5, pady=5)
+		Label(self.input_num_frame, text='h').grid(row=2, column=0, padx=5, pady=5)
+		Label(self.input_num_frame, text='Точность').grid(row=3, column=0, padx=5, pady=5)
+
+		self.lower = StringVar()
+		self.upper = StringVar()
+		self.stride = StringVar()
+		self.tolerance = StringVar()
+
+		Entry(self.input_num_frame, textvariable=self.lower).grid(row=0, column=1, padx=5, pady=5)
+		Entry(self.input_num_frame, textvariable=self.upper).grid(row=1, column=1, padx=5, pady=5)
+		Entry(self.input_num_frame, textvariable=self.stride).grid(row=2, column=1, padx=5, pady=5)
+		Entry(self.input_num_frame, textvariable=self.tolerance).grid(
+			row=3, column=1, padx=5, pady=5
+		)
+
+		Button(self.input_num_frame, text='Запустить ракету',
+		                  command=self.printer).grid(row=4, column=0,
+		                                             padx=5, pady=5)
+
+		self.results = {}
+		self.results['left_rectangle_I_n'] = StringVar()
+		self.results['right_rectangle_I_n'] = StringVar()
+		self.results['trapezoidal_I_n'] = StringVar()
+		self.results['simpson_rule_I_n'] = StringVar()
+		self.results['left_rectangle_I_2n'] = StringVar()
+		self.results['right_rectangle_I_2n'] = StringVar()
+		self.results['trapezoidal_I_2n'] = StringVar()
+		self.results['simpson_rule_I_2n'] = StringVar()
+		self.results['left_rectangle_n'] = StringVar()
+		self.results['right_rectangle_n'] = StringVar()
+		self.results['trapezoidal_n'] = StringVar()
+		self.results['simpson_rule_n'] = StringVar()
+		self.make_output(self.output_num_frame)
+
+		self.fig = plt.figure(figsize=(4, 3), dpi=100)
+		self.ax = self.fig.add_subplot(111)
+		self.ax.set_title("Пустой график")
+
+		self.canvas = FigureCanvasTkAgg(self.fig,
+		                                master=self.graph_area_frame)
+		self.canvas.draw()
+		self.canvas.get_tk_widget().pack(
+			side=TOP,
+			anchor='ne',
+			padx=10,
+			pady=10
+		)
+
+	def printer(self):
+		try:
+			params = self.get_input()
+			results = self.calculate_integrals(params)
+			self.update_results(results)
+			self.update_plot(params[:-1])
+
+		except ValueError as e:
+			messagebox.showerror(
+				"Ошибка ввода",
+				"Проверьте, что a, b, n и точность введены корректно"
+			)
+
+		except StepError:
+			messagebox.showerror(
+				"Ошибка шага",
+				"n должно быть целым числом больше 1"
+			)
+
+		except DomainError:
+			messagebox.showerror(
+				"Ошибка области определения",
+				"Функция не определена на данном интервале"
+			)
+
+		except ZeroDenominatorError:
+			messagebox.showerror(
+				"Деление на ноль",
+				"Знаменатель обращается в ноль"
+			)
+
+		except Exception as e:
+			messagebox.showerror(
+				"Неизвестная ошибка",
+				str(e)
+			)
+
+
+	def get_input(self):
+		a = float(self.lower.get())
+		b = float(self.upper.get())
+		n = int(self.stride.get())
+		tolerance = float(self.tolerance.get())
+
+		if self.selected_integral.get() == 1:
+			func = integrals.function_1
+		elif self.selected_integral.get() == 2:
+			func = integrals.function_2
+
+		return func, a, b, n, tolerance
+
+	def calculate_integrals(self, input_data):
+		return {
+			'left_rectangle': integrals.runge_rule(
+				integrals.left_rectangle, *input_data
+			),
+			'right_rectangle': integrals.runge_rule(
+				integrals.right_rectangle, *input_data
+			),
+			'trapezoidal': integrals.runge_rule(
+				integrals.trapezoidal, *input_data
+			),
+			'simpson_rule': integrals.runge_rule(
+				integrals.simpson_rule, *input_data
+			),
+		}
+
+	def update_results(self, results: dict):
+		for key in results:
+			self.results[key + '_I_n'].set(results[key]['I_n'])
+			self.results[key + '_I_2n'].set(results[key]['I_2n'])
+			self.results[key + '_n'].set(results[key]['n'])
+
+	def update_plot(self, params):
+		func, a, b, n = params
+		n = max(500, n)
+
+		self.ax.clear()
+		x = np.linspace(a, b, n)
+		y = func(x)
+
+		self.ax.plot(x, y)
+		self.canvas.draw()
+
+	def make_output(self, parent):
+		Label(parent, text='S левые').grid(
+			row=1, column=0, padx=5, pady=5
+		)
+		Label(parent, text='S правые').grid(
+			row=2, column=0, padx=5, pady=5,
+		)
+		Label(parent, text='S трап').grid(
+			row=3, column=0, padx=5, pady=5,
+		)
+		Label(parent, text='S симпс').grid(
+			row=4, column=0, padx=5, pady=5,
+		)
+		Label(parent, text='I_n').grid(
+			row=0, column=1, padx=5, pady=5,
+		)
+		Label(parent, text='I_2n').grid(
+			row=0, column=2, padx=5, pady=5,
+		)
+		Label(parent, text='n').grid(
+			row=0, column=3, padx=5, pady=5,
+		)
+		Entry(parent,
+		      textvariable=self.results['left_rectangle_I_n'],
+		      state='readonly').grid(
+			row=1, column=1, padx=5, pady=5
+		)
+		Entry(parent,
+		      textvariable=self.results['right_rectangle_I_n'],
+		      state='readonly').grid(
+			row=2, column=1, padx=5, pady=5
+		)
+		Entry(parent,
+		      textvariable=self.results['trapezoidal_I_n'],
+		      state='readonly').grid(
+			row=3, column=1, padx=5, pady=5
+		)
+		Entry(parent, textvariable=self.results['simpson_rule_I_n'],
+		      state='readonly').grid(
+			row=4, column=1, padx=5, pady=5
+		)
+
+		Entry(parent,
+		      textvariable=self.results['left_rectangle_I_2n'],
+		      state='readonly').grid(
+			row=1, column=2, padx=5, pady=5
+		)
+		Entry(parent,
+		      textvariable=self.results['right_rectangle_I_2n'],
+		      state='readonly').grid(
+			row=2, column=2, padx=5, pady=5
+		)
+		Entry(parent,
+		      textvariable=self.results['trapezoidal_I_2n'],
+		      state='readonly').grid(
+			row=3, column=2, padx=5, pady=5
+		)
+		Entry(parent, textvariable=self.results['simpson_rule_I_2n'],
+		      state='readonly').grid(
+			row=4, column=2, padx=5, pady=5
+		)
+
+		Entry(parent,
+		      textvariable=self.results['left_rectangle_n'],
+		      state='readonly').grid(
+			row=1, column=3, padx=5, pady=5
+		)
+		Entry(parent,
+		      textvariable=self.results['right_rectangle_n'],
+		      state='readonly').grid(
+			row=2, column=3, padx=5, pady=5
+		)
+		Entry(parent,
+		      textvariable=self.results['trapezoidal_n'],
+		      state='readonly').grid(
+			row=3, column=3, padx=5, pady=5
+		)
+		Entry(parent, textvariable=self.results['simpson_rule_n'],
+		      state='readonly').grid(
+			row=4, column=3, padx=5, pady=5
+		)
+		Button(parent, text='< назад', fg='red',
+		       command=self.main_app.open_integrals).grid(
+			row=4, column=4, padx=5, pady=5
+		)
 
 class RootFindingFrame(Frame):
-	def __init__(self, main_frame):
+	def __init__(self, main_frame, main_app):
 		Frame.__init__(self, main_frame)
 		self.make_widgets()
+		self.main_app = main_app
 	def make_widgets(self):
 		self.test_text = Label(self, text="Here'll be some Nonlinear "
 		                                  "Equations stuff")
 		self.test_text.pack(expand=True, fill=BOTH)
 
 class ApproximationFrame(Frame):
-	def __init__(self, main_frame):
+	def __init__(self, main_frame, main_app):
 		Frame.__init__(self, main_frame)
 		self.make_widgets()
+		self.main_app = main_app
 	def make_widgets(self):
 		self.test_text = Label(self, text="Here'll be some approximation "
 		                                  "stuff")
 		self.test_text.pack(expand=True, fill=BOTH)
 
 class InterpolationFrame(Frame):
-	def __init__(self, main_frame):
+	def __init__(self, main_frame, main_app):
 		Frame.__init__(self, main_frame)
 		self.make_widgets()
+		self.main_app = main_app
 	def make_widgets(self):
 		self.test_text = Label(self, text="Here'll be some Interpolation "
 		                                  "stuff")
 		self.test_text.pack(expand=True, fill=BOTH)
 
 class DifferentialEquationFrame(Frame):
-	def __init__(self, main_frame):
+	def __init__(self, main_frame, main_app):
 		Frame.__init__(self, main_frame)
 		self.make_widgets()
-
+		self.main_app = main_app
 	def make_widgets(self):
 		self.test_text = Label(self, text="Here'll be some "
-		                                  "sifferential equations stuff")
+		                                  "differential equations stuff")
 		self.test_text.pack(expand=True, fill=BOTH)
 
 if __name__ == "__main__":
