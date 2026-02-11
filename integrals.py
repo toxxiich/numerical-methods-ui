@@ -11,7 +11,13 @@ class ZeroDenominatorError(Exception):
 class StepError(Exception):
 	pass
 
-class OddStepWarning(Exception):
+class EvenStepWarning(Exception):
+	pass
+
+class EmptyInput(Exception):
+	pass
+
+class NonNumInput(Exception):
 	pass
 
 def function_1(x_arr):
@@ -65,11 +71,41 @@ def function_2(x_arr):
 
 	return np.sin(0.8 * x_arr + 0.3)/(1.2 + np.cos(x_arr ** 2 + 0.4))
 
-def validate_step(n):
-	if not isinstance(n, int):
+def validate_input(a, b, n):
+	if a== '' and b == '' and n == '':
+		raise EmptyInput("Чтобы прога работала, необходимо ввести значения:)")
+	if b == '' and n == '':
+		raise EmptyInput("Please, enter upper bound and stride")
+	if a == '':
+		raise EmptyInput("You didn't enter lover bound")
+	if b == '':
+		raise EmptyInput("You didn't enter upper bound")
+	if n == '':
+		raise EmptyInput("You didn't enter stride")
+	try:
+		a = float(a)
+	except ValueError:
+		raise NonNumInput("Lower bound must be a number")
+	try:
+		b = float(b)
+	except ValueError:
+		raise NonNumInput("Upper bound must be a number")
+	try:
+		n = int(n)
+	except ValueError:
 		raise StepError('Stride must be an integer')
-	elif n < 1:
+	if n < 1:
 		raise StepError('Step must be at least 1')
+	return a, b, n
+
+def validate_tolerance(tolerance):
+	if tolerance == 0:
+		raise EmptyInput("You didn't enter tolerance")
+	try:
+		tolerance = float(tolerance)
+	except ValueError:
+		raise NonNumInput('Tolerance must be a number')
+	return tolerance
 
 def left_rectangle(func, a, b, n):
 	"""
@@ -85,8 +121,7 @@ def left_rectangle(func, a, b, n):
 	        float: Approximation of the integral.
 	    """
 
-	validate_step(n)
-
+	a, b, n = validate_input(a, b, n)
 	x_arr = np.linspace(a, b, n+1, dtype='float64')
 	stride = x_arr[1] - x_arr[0]
 	func_arr = func(x_arr[:-1])
@@ -105,8 +140,7 @@ def right_rectangle(func, a, b, n):
 	    Returns:
 	        float: Approximation of the integral.
 	    """
-	validate_step(n)
-
+	a, b, n = validate_input(a, b, n)
 	x_arr = np.linspace(a, b, n+1, dtype='float64')
 	stride = x_arr[1] - x_arr[0]
 	func_arr = func(x_arr[1:])
@@ -125,8 +159,7 @@ def trapezoidal(func, a, b, n):
     Returns:
         float: Approximation of the integral.
     """
-	validate_step(n)
-
+	a, b, n = validate_input(a, b, n)
 	x_arr = np.linspace(a, b, n+1, dtype='float64')
 	stride = x_arr[1] - x_arr[0]
 	return np.round(np.sum((func(x_arr[:-1]) + func(x_arr[1:])) * stride /
@@ -149,9 +182,9 @@ def simpson_rule(func, a, b, n):
 	    Returns:
 	        float: Approximation of the integral.
 	    """
-	validate_step(n)
+	a, b, n = validate_input(a, b, n)
 	if not n % 2 == 0:
-		raise OddStepWarning('Simpson rule is only implemented for'
+		raise EvenStepWarning('Simpson rule is only implemented for'
 		                      ' even number of subintervals.')
 
 
@@ -202,9 +235,9 @@ def find_common_step(func, a, b, n_start):
 	        StepError: If `n_start` is not a positive integer.
 	        OddStepWarning: If `n_start` is not even (Simpson requires even number of subintervals).
 	"""
-	validate_step(n_start)
+	a, b, n_start = validate_input(a, b, n_start)
 	if not n_start % 2 == 0:
-		raise OddStepWarning('To compare methods we need Simpson, which '
+		raise EvenStepWarning('To compare methods we need Simpson, which '
 			'is only implemented for even number of subintervals.')
 
 	n = n_start
@@ -277,9 +310,8 @@ def runge_rule(method, func, a, b, n_start, tolerance):
 	    Returns:
 	        tuple: (I_n, I_2n, n) — integral approximations and number of subintervals.
 	"""
-
-	if n_start < 1:
-		raise StepError("n must be >= 1")
+	a, b, n_start = validate_input(a, b, n_start)
+	tolerance = validate_tolerance(tolerance)
 
 	n = n_start
 	p = convergence_rate(method)

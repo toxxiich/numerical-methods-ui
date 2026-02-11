@@ -1,11 +1,10 @@
 from tkinter import *
 from tkinter import messagebox
 from integrals import DomainError, ZeroDenominatorError, StepError, \
-	OddStepWarning
+	EvenStepWarning, EmptyInput, NonNumInput
 from PIL import Image, ImageTk
 import webbrowser
 import integrals
-from tkinter import font
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import numpy as np
@@ -211,7 +210,7 @@ class IntegralFrame(Frame):
 
 		Label(self.input_num_frame, text='a').grid(row=0, column=0, padx=5, pady=5)
 		Label(self.input_num_frame, text='b').grid(row=1, column=0, padx=5, pady=5)
-		Label(self.input_num_frame, text='h').grid(row=2, column=0, padx=5, pady=5)
+		Label(self.input_num_frame, text='n').grid(row=2, column=0, padx=5, pady=5)
 
 		self.lower = StringVar()
 		self.upper = StringVar()
@@ -250,16 +249,22 @@ class IntegralFrame(Frame):
 			self.update_results(results)
 			self.update_plot(params)
 
-		except ValueError:
+		except EmptyInput as e:
 			messagebox.showerror(
 				"Ошибка ввода",
-				"Проверьте, что a, b и n введены корректно"
+				e
 			)
 
-		except StepError:
+		except NonNumInput as e:
+			messagebox.showerror(
+				"Ошибка ввода",
+				e
+			)
+
+		except StepError as e:
 			messagebox.showerror(
 				"Ошибка шага",
-				"n должно быть целым числом хотя бы равным 1"
+				e
 			)
 
 		except DomainError:
@@ -277,7 +282,11 @@ class IntegralFrame(Frame):
 		except Exception as e:
 			messagebox.showerror(
 				"Неизвестная ошибка",
-				str(e)
+				f'Упс...\nВы нашли ошибку, которую я не '
+				f'предусмотел!\n\nПожалуйста, напишите о ней на почту нашего '
+				f'разработчика antonsu-spb@yandex.ru и мы обязательно учтем '
+				f'её в следующем релизе!\n\nP.S. Ошибка, с которой вы '
+				f'столкнулись: {e}'
 			)
 
 	def find_min_n(self):
@@ -285,15 +294,50 @@ class IntegralFrame(Frame):
 			self.results['min_common_step'].set(integrals.find_common_step(
 				*self.get_input()
 			))
-		except OddStepWarning as e:
+		except EmptyInput as e:
 			messagebox.showerror(
-				'Ошибка вычисления min n',
+				"Ошибка ввода",
 				e
 			)
+
+		except StepError as e:
+			messagebox.showerror(
+				"Ошибка шага",
+				e
+			)
+
+		except NonNumInput as e:
+			messagebox.showerror(
+				"Ошибка ввода",
+				e
+			)
+
+		except DomainError:
+			messagebox.showerror(
+				"Ошибка области определения",
+				"Функция не определена на данном интервале"
+			)
+
+		except ZeroDenominatorError:
+			messagebox.showerror(
+				"Деление на ноль",
+				"Знаменатель обращается в ноль"
+			)
+
+		except EvenStepWarning as e:
+			messagebox.showerror(
+				'Нечетное разбиение',
+				'Simpson rule requires even n'
+			)
+
 		except Exception as e:
 			messagebox.showerror(
-				'Что-то пошло не так',
-				e
+				"Неизвестная ошибка",
+				f'Упс...\nВы нашли ошибку, которую я не '
+				f'предусмотел!\n\nПожалуйста, напишите о ней на почту нашего '
+				f'разработчика antonsu-spb@yandex.ru и мы обязательно учтем '
+				f'её в следующем релизе!\n\nP.S. Ошибка, с которой вы '
+				f'столкнулись: {e}'
 			)
 		Button(self.output_num_frame, text='Проверить nmin',
 		       command=self.check_n).grid(
@@ -304,9 +348,9 @@ class IntegralFrame(Frame):
 		self.printer()
 
 	def get_input(self):
-		a = float(self.lower.get())
-		b = float(self.upper.get())
-		n = int(self.stride.get())
+		a = self.lower.get()
+		b = self.upper.get()
+		n = self.stride.get()
 
 		if self.selected_integral.get() == 1:
 			func = integrals.function_1
@@ -323,7 +367,7 @@ class IntegralFrame(Frame):
 		}
 		try:
 			res_dict['simpson_rule'] = integrals.simpson_rule(*input_data)
-		except OddStepWarning:
+		except EvenStepWarning:
 			res_dict['simpson_rule'] = 'enter even n!!'
 			messagebox.showwarning(
 				'Нечетное разбиение',
@@ -337,10 +381,13 @@ class IntegralFrame(Frame):
 			self.results[key].set(results[key])
 
 	def update_plot(self, params):
-		func, a, b, n = params
+		a, b, n = integrals.validate_input(*params[1:])
+		func = params[0]
+		MIN_PLOT_POINTS = 500
+		n = int(n)
 
 		self.ax.clear()
-		x = np.linspace(a, b, n)
+		x = np.linspace(a, b, max(MIN_PLOT_POINTS, n))
 		y = func(x)
 
 		self.ax.plot(x, y)
@@ -444,7 +491,7 @@ class RungeRuleFrame(Frame):
 
 		Label(self.input_num_frame, text='a').grid(row=0, column=0, padx=5, pady=5)
 		Label(self.input_num_frame, text='b').grid(row=1, column=0, padx=5, pady=5)
-		Label(self.input_num_frame, text='h').grid(row=2, column=0, padx=5, pady=5)
+		Label(self.input_num_frame, text='n').grid(row=2, column=0, padx=5, pady=5)
 		Label(self.input_num_frame, text='Точность').grid(row=3, column=0, padx=5, pady=5)
 
 		self.lower = StringVar()
@@ -497,18 +544,19 @@ class RungeRuleFrame(Frame):
 			params = self.get_input()
 			results = self.calculate_integrals(params)
 			self.update_results(results)
-			self.update_plot(params[:-1])
+			self.update_plot(params)
 
-		except ValueError as e:
+
+		except EmptyInput as e:
 			messagebox.showerror(
 				"Ошибка ввода",
-				"Проверьте, что a, b, n и точность введены корректно"
+				e
 			)
 
-		except StepError:
+		except StepError as e:
 			messagebox.showerror(
 				"Ошибка шага",
-				"n должно быть целым числом больше 1"
+				e
 			)
 
 		except DomainError:
@@ -523,18 +571,34 @@ class RungeRuleFrame(Frame):
 				"Знаменатель обращается в ноль"
 			)
 
+		except NonNumInput as e:
+			messagebox.showerror(
+				"Ошибка ввода",
+				e
+			)
+
+		except EvenStepWarning as e:
+			messagebox.showerror(
+				'Нечетное разбиение',
+				'Simpson rule requires even n'
+			)
+
 		except Exception as e:
 			messagebox.showerror(
 				"Неизвестная ошибка",
-				str(e)
+				f'Упс...\nВы нашли ошибку, которую я не '
+				f'предусмотел!\n\nПожалуйста, напишите о ней на почту нашего '
+				f'разработчика antonsu-spb@yandex.ru и мы обязательно учтем '
+				f'её в следующем релизе!\n\nP.S. Ошибка, с которой вы '
+				f'столкнулись: {e}'
 			)
 
 
 	def get_input(self):
-		a = float(self.lower.get())
-		b = float(self.upper.get())
-		n = int(self.stride.get())
-		tolerance = float(self.tolerance.get())
+		a = self.lower.get()
+		b = self.upper.get()
+		n = self.stride.get()
+		tolerance = self.tolerance.get()
 
 		if self.selected_integral.get() == 1:
 			func = integrals.function_1
@@ -566,8 +630,11 @@ class RungeRuleFrame(Frame):
 			self.results[key + '_n'].set(results[key]['n'])
 
 	def update_plot(self, params):
-		func, a, b, n = params
-		n = max(500, n)
+		a, b, n, _ = params[1:]
+		a, b, n = integrals.validate_input(a, b, n)
+		func = params[0]
+		MIN_PLOT_POINTS = 500
+		n = max(MIN_PLOT_POINTS, n)
 
 		self.ax.clear()
 		x = np.linspace(a, b, n)
